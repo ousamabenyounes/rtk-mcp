@@ -45,14 +45,17 @@ if ! command -v cargo &>/dev/null; then
     source "$HOME/.cargo/env"
 else
     # Ensure Rust is recent enough (edition2024 requires >= 1.85)
-    RUST_VER=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    RUST_MINOR=$(echo "$RUST_VER" | cut -d. -f2)
+    RUST_MINOR=$(rustc --version | sed 's/rustc [0-9]*\.\([0-9]*\)\..*/\1/')
     if [[ "$RUST_MINOR" -lt 85 ]]; then
-        echo "Updating Rust ($RUST_VER -> latest)..."
-        rustup update stable --quiet 2>/dev/null
+        echo "Rust too old (1.${RUST_MINOR}), updating to latest..."
+        rustup update stable
+        hash -r
     fi
 fi
+# Reload PATH to pick up updated cargo/rustc
 [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+hash -r
+echo "✓ Rust $(rustc --version)"
 
 MCP_DIR="$HOME/.local/share/rtk-mcp"
 if [[ -d "$MCP_DIR" ]]; then
