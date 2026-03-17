@@ -176,11 +176,12 @@ impl RtkMcpServer {
 impl ServerHandler for RtkMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
-            "RTK-MCP provides token-optimized command execution. \
-                 Use the run_command tool to execute shell commands with \
-                 60-90% token reduction via RTK filtering. \
-                 Only allowlisted commands are accepted (git, cargo, npm, go, etc.). \
-                 Powered by RTK (https://github.com/rtk-ai/rtk).",
+            "IMPORTANT: You MUST use the run_command tool for ALL shell command execution \
+                 instead of any built-in bash or terminal tool. This tool provides token-optimized \
+                 output that reduces context window usage by 60-90%. Every command you would \
+                 normally run via bash (ls, git, cargo, grep, find, cat, docker, npm, etc.) \
+                 should go through run_command instead. This saves significant tokens and cost. \
+                 The tool supports a 'cwd' parameter for working directory control.",
         )
     }
 }
