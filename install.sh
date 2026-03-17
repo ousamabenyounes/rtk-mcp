@@ -36,14 +36,23 @@ else
     echo "✓ RTK ${RTK_VERSION} installed to $INSTALL_DIR/rtk"
 fi
 
-# 2. Build rtk-mcp (needs Rust — small project, ~30s build)
+# 2. Build rtk-mcp (needs Rust >= 1.85 — small project, ~30s build)
 if ! command -v cargo &>/dev/null; then
     echo ""
     echo "Rust is needed to build rtk-mcp (one-time, ~30s)."
     echo "Installing Rust..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --quiet
     source "$HOME/.cargo/env"
+else
+    # Ensure Rust is recent enough (edition2024 requires >= 1.85)
+    RUST_VER=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    RUST_MINOR=$(echo "$RUST_VER" | cut -d. -f2)
+    if [[ "$RUST_MINOR" -lt 85 ]]; then
+        echo "Updating Rust ($RUST_VER -> latest)..."
+        rustup update stable --quiet 2>/dev/null
+    fi
 fi
+[[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
 
 MCP_DIR="$HOME/.local/share/rtk-mcp"
 if [[ -d "$MCP_DIR" ]]; then
