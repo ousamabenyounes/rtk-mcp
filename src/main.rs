@@ -1,11 +1,11 @@
 use std::process::Command;
 
 use rmcp::{
-    ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{ServerCapabilities, ServerInfo},
     schemars, tool, tool_handler, tool_router,
     transport::stdio,
+    ServerHandler, ServiceExt,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -14,11 +14,46 @@ const MAX_COMMAND_LEN: usize = 4096;
 
 /// Commands that RTK supports and that are safe to execute.
 const ALLOWED_COMMANDS: &[&str] = &[
-    "git", "cargo", "npm", "npx", "pnpm", "pytest", "ruff", "mypy", "pip", "uv",
-    "go", "golangci-lint", "docker", "grep", "find", "ls", "cat", "head", "tail",
-    "wc", "env", "echo", "pwd", "gh", "curl", "wget", "rtk",
-    "node", "tsc", "next", "prettier", "eslint", "biome", "playwright", "prisma",
-    "vitest", "dotnet", "psql", "make", "tree",
+    "git",
+    "cargo",
+    "npm",
+    "npx",
+    "pnpm",
+    "pytest",
+    "ruff",
+    "mypy",
+    "pip",
+    "uv",
+    "go",
+    "golangci-lint",
+    "docker",
+    "grep",
+    "find",
+    "ls",
+    "cat",
+    "head",
+    "tail",
+    "wc",
+    "env",
+    "echo",
+    "pwd",
+    "gh",
+    "curl",
+    "wget",
+    "rtk",
+    "node",
+    "tsc",
+    "next",
+    "prettier",
+    "eslint",
+    "biome",
+    "playwright",
+    "prisma",
+    "vitest",
+    "dotnet",
+    "psql",
+    "make",
+    "tree",
 ];
 
 #[derive(Debug, Clone)]
@@ -50,11 +85,15 @@ impl Default for RtkMcpServer {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct RunCommandRequest {
-    #[schemars(description = "The command to execute, e.g. 'git status', 'cargo test', 'ls -la src/'. \
-        Only allowlisted commands are accepted (git, cargo, npm, go, docker, grep, ls, etc.).")]
+    #[schemars(
+        description = "The command to execute, e.g. 'git status', 'cargo test', 'ls -la src/'. \
+        Only allowlisted commands are accepted (git, cargo, npm, go, docker, grep, ls, etc.)."
+    )]
     command: String,
 
-    #[schemars(description = "Working directory for the command. Defaults to server cwd if omitted.")]
+    #[schemars(
+        description = "Working directory for the command. Defaults to server cwd if omitted."
+    )]
     cwd: Option<String>,
 }
 
@@ -94,10 +133,7 @@ impl RtkMcpServer {
         }
 
         // Security: validate command against allowlist
-        let base_cmd = parts[0]
-            .rsplit('/')
-            .next()
-            .unwrap_or(&parts[0]);
+        let base_cmd = parts[0].rsplit('/').next().unwrap_or(&parts[0]);
         if !ALLOWED_COMMANDS.contains(&base_cmd) {
             return Err(format!(
                 "Command '{}' is not in the RTK allowlist. Allowed: {}",
@@ -139,14 +175,13 @@ impl RtkMcpServer {
 #[tool_handler]
 impl ServerHandler for RtkMcpServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions(
-                "RTK-MCP provides token-optimized command execution. \
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
+            "RTK-MCP provides token-optimized command execution. \
                  Use the run_command tool to execute shell commands with \
                  60-90% token reduction via RTK filtering. \
                  Only allowlisted commands are accepted (git, cargo, npm, go, etc.). \
                  Powered by RTK (https://github.com/rtk-ai/rtk).",
-            )
+        )
     }
 }
 
@@ -211,12 +246,9 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Starting RTK-MCP server v{}", env!("CARGO_PKG_VERSION"));
 
-    let service = RtkMcpServer::new()
-        .serve(stdio())
-        .await
-        .inspect_err(|e| {
-            tracing::error!("Server error: {:?}", e);
-        })?;
+    let service = RtkMcpServer::new().serve(stdio()).await.inspect_err(|e| {
+        tracing::error!("Server error: {:?}", e);
+    })?;
 
     service.waiting().await?;
     Ok(())
@@ -258,8 +290,8 @@ mod tests {
 
     #[test]
     fn test_run_raw_echo() {
-        let result = run_command_with("echo", &["hello"], None)
-            .expect("echo should always succeed");
+        let result =
+            run_command_with("echo", &["hello"], None).expect("echo should always succeed");
         assert!(result.output.contains("hello"));
         assert!(result.success);
     }
@@ -286,8 +318,7 @@ mod tests {
 
     #[test]
     fn test_shlex_handles_quotes() {
-        let parts = shlex::split("git log --format=\"%H %s\"")
-            .expect("should parse quoted args");
+        let parts = shlex::split("git log --format=\"%H %s\"").expect("should parse quoted args");
         assert_eq!(parts, vec!["git", "log", "--format=%H %s"]);
     }
 
