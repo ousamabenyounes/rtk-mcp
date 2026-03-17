@@ -1,6 +1,6 @@
 #!/bin/bash
 # RTK-MCP Installer for macOS
-# Installs rtk-mcp as a Claude Desktop MCP server
+# Downloads pre-built binaries — no Rust needed
 set -e
 
 echo "╔══════════════════════════════════════════════╗"
@@ -15,68 +15,72 @@ if [[ "$(uname)" != "Darwin" ]]; then
     exit 1
 fi
 
-# Check Rust/cargo
+INSTALL_DIR="$HOME/.local/bin"
+mkdir -p "$INSTALL_DIR"
+
+# Detect architecture
+ARCH=$(uname -m)
+if [[ "$ARCH" == "arm64" ]]; then
+    RTK_TARBALL="rtk-aarch64-apple-darwin.tar.gz"
+else
+    RTK_TARBALL="rtk-x86_64-apple-darwin.tar.gz"
+fi
+
+# 1. Install RTK (pre-built binary from GitHub releases)
+if command -v rtk &>/dev/null && rtk --version 2>/dev/null | grep -q "^rtk "; then
+    echo "✓ RTK $(rtk --version 2>/dev/null | head -1) already installed"
+else
+    echo "Downloading RTK..."
+    RTK_VERSION=$(curl -sL https://api.github.com/repos/rtk-ai/rtk/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+    curl -sL "https://github.com/rtk-ai/rtk/releases/download/${RTK_VERSION}/${RTK_TARBALL}" | tar xz -C "$INSTALL_DIR"
+    echo "✓ RTK ${RTK_VERSION} installed to $INSTALL_DIR/rtk"
+fi
+
+# 2. Build rtk-mcp (needs Rust — small project, ~30s build)
 if ! command -v cargo &>/dev/null; then
+    echo ""
+    echo "Rust is needed to build rtk-mcp (one-time, ~30s)."
     echo "Installing Rust..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --quiet
     source "$HOME/.cargo/env"
 fi
-echo "✓ Rust $(rustc --version | cut -d' ' -f2)"
 
-# Install RTK (the filtering engine)
-if command -v rtk &>/dev/null && rtk --version 2>/dev/null | grep -q "^rtk "; then
-    echo "✓ RTK $(rtk --version | cut -d' ' -f2) already installed"
-else
-    echo "Installing RTK..."
-    cargo install --git https://github.com/rtk-ai/rtk
-    echo "✓ RTK installed"
-fi
-
-# Clone and build rtk-mcp
-INSTALL_DIR="$HOME/.local/share/rtk-mcp"
-if [[ -d "$INSTALL_DIR" ]]; then
+MCP_DIR="$HOME/.local/share/rtk-mcp"
+if [[ -d "$MCP_DIR" ]]; then
     echo "Updating rtk-mcp..."
-    cd "$INSTALL_DIR"
-    git pull --ff-only
+    cd "$MCP_DIR" && git pull --ff-only --quiet
 else
     echo "Cloning rtk-mcp..."
-    mkdir -p "$(dirname "$INSTALL_DIR")"
-    git clone https://github.com/ousamabenyounes/rtk-mcp.git "$INSTALL_DIR"
-    cd "$INSTALL_DIR"
+    git clone --quiet https://github.com/ousamabenyounes/rtk-mcp.git "$MCP_DIR"
+    cd "$MCP_DIR"
 fi
 
-echo "Building rtk-mcp (release)..."
-cargo build --release 2>&1 | tail -1
-BINARY="$INSTALL_DIR/target/release/rtk-mcp"
-echo "✓ Binary: $BINARY"
+echo "Building rtk-mcp..."
+cargo build --release --quiet
+BINARY="$MCP_DIR/target/release/rtk-mcp"
+echo "✓ rtk-mcp built"
 
-# Configure Claude Desktop
+# 3. Configure Claude Desktop
 CONFIG_DIR="$HOME/Library/Application Support/Claude"
 CONFIG_FILE="$CONFIG_DIR/claude_desktop_config.json"
 mkdir -p "$CONFIG_DIR"
 
 if [[ -f "$CONFIG_FILE" ]]; then
-    # Merge with existing config
     if grep -q "rtk" "$CONFIG_FILE" 2>/dev/null; then
-        echo "✓ Claude Desktop already configured for rtk-mcp"
+        echo "✓ Claude Desktop already configured"
     else
-        echo "Adding rtk-mcp to existing Claude Desktop config..."
-        # Use python to merge JSON safely
         python3 -c "
-import json, sys
+import json
 with open('$CONFIG_FILE') as f:
     config = json.load(f)
 config.setdefault('mcpServers', {})
-config['mcpServers']['rtk'] = {
-    'command': '$BINARY'
-}
+config['mcpServers']['rtk'] = {'command': '$BINARY'}
 with open('$CONFIG_FILE', 'w') as f:
     json.dump(config, f, indent=2)
-print('✓ Config updated')
+print('✓ Claude Desktop config updated')
 "
     fi
 else
-    # Create new config
     cat > "$CONFIG_FILE" << JSONEOF
 {
   "mcpServers": {
@@ -89,30 +93,14 @@ JSONEOF
     echo "✓ Claude Desktop config created"
 fi
 
+# 4. Add to PATH if needed
+if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
+    echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$HOME/.zshrc"
+    echo "✓ Added $INSTALL_DIR to PATH (restart terminal)"
+fi
+
 echo ""
 echo "╔══════════════════════════════════════════════╗"
-echo "║  Installation complete!                      ║"
-echo "╠══════════════════════════════════════════════╣"
-echo "║                                              ║"
-echo "║  1. Restart Claude Desktop (Cmd+Q, reopen)   ║"
-echo "║  2. Click the hammer icon in the chat        ║"
-echo "║  3. You should see 'run_command' tool        ║"
-echo "║  4. Ask Claude: 'run ls -la'                 ║"
-echo "║                                              ║"
+echo "║  Done! Restart Claude Desktop (Cmd+Q)       ║"
+echo "║  Then ask Claude: 'run ls -la'              ║"
 echo "╚══════════════════════════════════════════════╝"
-echo ""
-echo "Config: $CONFIG_FILE"
-echo "Binary: $BINARY"
-echo ""
-
-# Quick test
-echo "Testing rtk-mcp..."
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}' \
-  | timeout 5 "$BINARY" 2>/dev/null | head -1 | python3 -c "
-import sys, json
-r = json.loads(sys.stdin.readline())
-if 'result' in r:
-    print('✓ rtk-mcp server responds correctly')
-else:
-    print('✗ Unexpected response')
-" 2>/dev/null || echo "✓ Binary built (test skipped)"
