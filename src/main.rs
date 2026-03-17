@@ -150,11 +150,11 @@ impl RtkMcpServer {
                 Ok(out) => out,
                 Err(rtk_err) => {
                     tracing::warn!("rtk failed ({}), falling back to raw command", rtk_err);
-                    run_command_with(&parts_ref[0], &parts_ref[1..], cwd.as_deref())?
+                    run_command_with(parts_ref[0], &parts_ref[1..], cwd.as_deref())?
                 }
             }
         } else {
-            run_command_with(&parts_ref[0], &parts_ref[1..], cwd.as_deref())?
+            run_command_with(parts_ref[0], &parts_ref[1..], cwd.as_deref())?
         };
 
         // Format output with exit code info
