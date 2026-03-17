@@ -444,6 +444,7 @@ dependencies = [
  "rmcp",
  "serde",
  "serde_json",
+ "shlex",
  "tokio",
  "tracing",
  "tracing-subscriber",
