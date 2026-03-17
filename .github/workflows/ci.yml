@@ -1,0 +1,150 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --all
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Install RTK for integration tests
+        run: cargo install --git https://github.com/rtk-ai/rtk
+
+      - name: MCP functional test
+        run: |
+          # Verify RTK is installed
+          rtk --version
+
+          # Send MCP JSON-RPC messages and validate responses
+          RESPONSES=$(
+          {
+            echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0.1.0"}}}'
+            sleep 0.3
+            echo '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+            sleep 0.2
+            # tools/list
+            echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+            sleep 0.3
+            # Allowed command: echo
+            echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"echo hello from CI"}}}'
+            sleep 0.3
+            # Allowed command: ls (through rtk)
+            echo '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"ls src/"}}}'
+            sleep 0.3
+            # BLOCKED command: bash
+            echo '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"bash -c whoami"}}}'
+            sleep 0.3
+            # BLOCKED command: rm
+            echo '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"rm -rf /"}}}'
+            sleep 0.3
+          } | timeout 15 ./target/release/rtk-mcp 2>/dev/null
+          )
+
+          echo "$RESPONSES"
+
+          # Validate each response
+          echo "--- Checking initialize ---"
+          echo "$RESPONSES" | head -1 | python3 -c "
+          import sys, json
+          r = json.loads(sys.stdin.readline())
+          assert r['id'] == 1
+          assert 'result' in r
+          assert r['result']['protocolVersion'] == '2024-11-05'
+          print('PASS: initialize')
+          "
+
+          echo "--- Checking tools/list ---"
+          echo "$RESPONSES" | sed -n '2p' | python3 -c "
+          import sys, json
+          r = json.loads(sys.stdin.readline())
+          assert r['id'] == 2
+          tools = r['result']['tools']
+          assert len(tools) == 1, f'Expected 1 tool, got {len(tools)}'
+          assert tools[0]['name'] == 'run_command'
+          assert 'command' in tools[0]['inputSchema']['properties']
+          assert 'cwd' in tools[0]['inputSchema']['properties']
+          print('PASS: tools/list (1 tool: run_command with command + cwd params)')
+          "
+
+          echo "--- Checking echo (allowed) ---"
+          echo "$RESPONSES" | sed -n '3p' | python3 -c "
+          import sys, json
+          r = json.loads(sys.stdin.readline())
+          assert r['id'] == 3
+          text = r['result']['content'][0]['text']
+          assert 'hello from CI' in text, f'Expected hello, got: {text}'
+          assert r['result']['isError'] == False
+          print('PASS: echo allowed and executed')
+          "
+
+          echo "--- Checking ls via RTK (filtered) ---"
+          echo "$RESPONSES" | sed -n '4p' | python3 -c "
+          import sys, json
+          r = json.loads(sys.stdin.readline())
+          assert r['id'] == 4
+          text = r['result']['content'][0]['text']
+          assert 'main.rs' in text, f'Expected main.rs in output: {text}'
+          assert r['result']['isError'] == False
+          # Verify RTK filtering (should show file sizes, not raw ls -la format)
+          assert '.rs' in text
+          print('PASS: ls executed through RTK with filtering')
+          "
+
+          echo "--- Checking bash BLOCKED ---"
+          echo "$RESPONSES" | sed -n '5p' | python3 -c "
+          import sys, json
+          r = json.loads(sys.stdin.readline())
+          assert r['id'] == 5
+          text = r['result']['content'][0]['text']
+          assert 'allowlist' in text.lower(), f'Expected allowlist error: {text}'
+          assert r['result']['isError'] == True
+          print('PASS: bash blocked by allowlist')
+          "
+
+          echo "--- Checking rm BLOCKED ---"
+          echo "$RESPONSES" | sed -n '6p' | python3 -c "
+          import sys, json
+          r = json.loads(sys.stdin.readline())
+          assert r['id'] == 6
+          text = r['result']['content'][0]['text']
+          assert 'allowlist' in text.lower(), f'Expected allowlist error: {text}'
+          assert r['result']['isError'] == True
+          print('PASS: rm blocked by allowlist')
+          "
+
+          echo ""
+          echo "All MCP functional tests passed!"
